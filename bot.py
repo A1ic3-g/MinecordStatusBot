@@ -53,7 +53,7 @@ class DiscordStatusBot(commands.Bot):
     def __init__(self, config_file: str = CONFIG_FILE):
         intents = discord.Intents.default()
         intents.message_content = True 
-        super().__init__(intents=intents)
+        super().__init__(command_prefix="!", intents=intents)
         self.config_file = config_file
         self.config: dict = load_config(config_file)
 
