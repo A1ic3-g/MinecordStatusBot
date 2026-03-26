@@ -23,6 +23,8 @@ CONFIG_DIR = "data"
 # Default values
 DEFAULT_UPDATE_INTERVAL = 60
 DEFAULT_MINECRAFT_PORT = 25565
+DEFAULT_SHOW_PLAYERS = True
+DEFAULT_MAX_PLAYERS_DISPLAY = 10
 
 # Config keys
 CONFIG_GUILD_ID = "guild_id"
@@ -31,6 +33,8 @@ CONFIG_MESSAGE_ID = "message_id"
 CONFIG_SERVER_IP = "server_ip"
 CONFIG_SERVER_PORT = "server_port"
 CONFIG_INTERVAL = "interval"
+CONFIG_SHOW_PLAYERS = "show_players"
+CONFIG_MAX_PLAYERS_DISPLAY = "max_players_display"
 
 # Ensure data directory exists
 if not os.path.exists(CONFIG_DIR):
@@ -63,16 +67,17 @@ class DiscordStatusBot(commands.Bot):
         self.update_status.change_interval(seconds=interval)
         self.update_status.start()
 
-    async def _check_server_status(self, ip: str, port: int) -> tuple[bool, int, int]:
-        """Check if Minecraft server is online and get player counts."""
+    async def _check_server_status(self, ip: str, port: int) -> tuple[bool, int, int, list[str]]:
+        """Check if Minecraft server is online and get player counts and names."""
         try:
             server = JavaServer.lookup(f"{ip}:{port}")
             status = await server.async_status()
-            return True, status.players.online, status.players.max
+            player_names = [player.name for player in status.players.sample] if status.players.sample else []
+            return True, status.players.online, status.players.max, player_names
         except Exception:
-            return False, 0, 0
+            return False, 0, 0, []
 
-    def _create_status_embed(self, online: bool, players: int, max_players: int) -> discord.Embed:
+    def _create_status_embed(self, online: bool, players: int, max_players: int, player_names: list[str] | None = None, show_players: bool = True, max_display: int = 10) -> discord.Embed:
         """Create a status embed for the Minecraft server."""
         embed = discord.Embed(
             title="Minecraft Server Status",
@@ -81,6 +86,11 @@ class DiscordStatusBot(commands.Bot):
         embed.add_field(name="Status", value="Online" if online else "Offline", inline=True)
         if online:
             embed.add_field(name="Players", value=f"{players}/{max_players}", inline=True)
+            if show_players and player_names:
+                player_list = ", ".join(player_names[:max_display])
+                if len(player_names) > max_display:
+                    player_list += f" +{len(player_names) - max_display} more"
+                embed.add_field(name="Online Players", value=player_list, inline=False)
         embed.timestamp = discord.utils.utcnow()
         return embed
 
@@ -119,8 +129,10 @@ class DiscordStatusBot(commands.Bot):
             if not server_ip:
                 return
 
-            online, players, max_players = await self._check_server_status(server_ip, server_port)
-            embed = self._create_status_embed(online, players, max_players)
+            online, players, max_players, player_names = await self._check_server_status(server_ip, server_port)
+            show_players = self.config.get(CONFIG_SHOW_PLAYERS, DEFAULT_SHOW_PLAYERS)
+            max_display = self.config.get(CONFIG_MAX_PLAYERS_DISPLAY, DEFAULT_MAX_PLAYERS_DISPLAY)
+            embed = self._create_status_embed(online, players, max_players, player_names, show_players, max_display)
             message = await self._get_message_from_config()
 
             if message:
@@ -136,9 +148,13 @@ class DiscordStatusBot(commands.Bot):
     @app_commands.describe(
         ip="Minecraft server IP",
         port=f"Minecraft server port (default: {DEFAULT_MINECRAFT_PORT})",
-        interval=f"Update interval in seconds (default: {DEFAULT_UPDATE_INTERVAL})"
+        interval=f"Update interval in seconds (default: {DEFAULT_UPDATE_INTERVAL})",
+        show_players="Show online player names (default: true)",
+        max_players_display=f"Max player names to display (default: {DEFAULT_MAX_PLAYERS_DISPLAY})"
     )
-    async def setup(self, interaction: discord.Interaction, ip: str, port: int = DEFAULT_MINECRAFT_PORT, interval: int = DEFAULT_UPDATE_INTERVAL):
+    async def setup(self, 
+    interaction: discord.Interaction, 
+    ip: str, port: int = DEFAULT_MINECRAFT_PORT, interval: int = DEFAULT_UPDATE_INTERVAL, show_players: bool = DEFAULT_SHOW_PLAYERS, max_players_display: int = DEFAULT_MAX_PLAYERS_DISPLAY):
         """Setup the Minecraft server monitoring for a channel."""
         if not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message("You must be an administrator to use this command.", ephemeral=True)
@@ -147,14 +163,14 @@ class DiscordStatusBot(commands.Bot):
         await interaction.response.defer()
 
         # Check server availability
-        online, players, max_players = await self._check_server_status(ip, port)
-        embed = self._create_status_embed(online, players, max_players)
+        online, players, max_players, player_names = await self._check_server_status(ip, port)
+        embed = self._create_status_embed(online, players, max_players, player_names, show_players, max_players_display)
 
         # Send initial status message
         message = await interaction.channel.send(embed=embed)
 
         # Update configuration
-        self._save_setup_config(interaction, ip, port, interval, message.id)
+        self._save_setup_config(interaction, ip, port, interval, message.id, show_players, max_players_display)
 
         # Update the loop interval
         self.update_status.change_interval(seconds=interval)
@@ -164,7 +180,7 @@ class DiscordStatusBot(commands.Bot):
             ephemeral=True
         )
 
-    def _save_setup_config(self, interaction: discord.Interaction, ip: str, port: int, interval: int, message_id: int) -> None:
+    def _save_setup_config(self, interaction: discord.Interaction, ip: str, port: int, interval: int, message_id: int, show_players: bool = True, max_players_display: int = 10) -> None:
         """Save the setup configuration to file."""
         self.config[CONFIG_GUILD_ID] = interaction.guild_id
         self.config[CONFIG_CHANNEL_ID] = interaction.channel_id
@@ -172,6 +188,8 @@ class DiscordStatusBot(commands.Bot):
         self.config[CONFIG_SERVER_IP] = ip
         self.config[CONFIG_SERVER_PORT] = port
         self.config[CONFIG_INTERVAL] = interval
+        self.config[CONFIG_SHOW_PLAYERS] = show_players
+        self.config[CONFIG_MAX_PLAYERS_DISPLAY] = max_players_display
         save_config(self.config, self.config_file)
         logger.info(f"Setup configured for {ip}:{port} with {interval}s update interval")
 
