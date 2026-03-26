@@ -1,0 +1,17 @@
+[project]
+name = "mc-discord-bot"
+version = "0.1.0"
+description = "A lightweight Discord bot to monitor Minecraft server status."
+dependencies = [
+    "discord.py>=2.3.2",
+    "mcstatus>=11.1.1",
+    "python-dotenv>=1.0.0",
+]
+requires-python = ">=3.11"
+
+[tool.uv]
+package = false
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

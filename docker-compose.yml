@@ -1,0 +1,11 @@
+services:
+  mc-discord-bot:
+    build: .
+    container_name: mc-discord-bot
+    restart: always
+    environment:
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
+    volumes:
+      - ./data:/app/data
+    env_file:
+      - .env
